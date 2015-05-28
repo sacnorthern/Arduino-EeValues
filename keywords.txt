@@ -1,0 +1,49 @@
+#######################################
+# Syntax Coloring Map For EeValues
+#######################################
+
+#######################################
+# Methods and Functions EeValues (KEYWORD2)
+#######################################
+
+tryRead			KEYWORD2
+write			KEYWORD2
+eraseUserData           KEYWORD2
+printHexWidth		KEYWORD2
+dumpEE	                KEYWORD2
+offsetAfter             KEYWORD2
+
+realSize                KEYWORD2
+userSize                KEYWORD2
+
+updateCrc8		KEYWORD2
+crc8                    KEYWORD2
+setCrc8                 KEYWORD2
+
+MK4CODE			KEYWORD2
+
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+uint8_t         KEYWORD1
+uint16_t        KEYWORD1
+uint32_t        KEYWORD1
+
+EeIdent         KEYWORD1
+
+EeValues	KEYWORD1
+
+#######################################
+# Instances (KEYWORD2)
+#######################################
+
+# EeValues	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+_EEVALUES_CRC_SEED      LITERAL1
+_EEVALUES_VERSION       LITERAL1
