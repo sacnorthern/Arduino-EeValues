@@ -23,20 +23,26 @@
  *    brian witt    Sept 2013    New.
  *    brian witt    Nov 2013     Fields stored in EE memory now own structure.
  */
- 
+
 #ifndef _LIBRARIES_EEVALUES_H
 #define _LIBRARIES_EEVALUES_H
- 
+
 #include <inttypes.h>
 #include "Arduino.h"            // for 'boolean' and 'byte'
 
 
-/* ------------------------------------------------------------------- */
-
-#define _EEVALUES_VERSION  1
-
 /**  Define 1 to hunt/search for RECORD, 0 for client to explicitly state offset. */
 #define _EEVALUES_CONF_HUNT_FOR_RECORD   0
+
+
+/* ------------------------------------------------------------------- */
+
+// https://gcc.gnu.org/onlinedocs/gcc/Common-Type-Attributes.html#Common-Type-Attributes
+#ifdef PACKED
+#define  PACKED   __attribute__ ((__packed__))
+#endif  /* PACKED */
+
+#define _EEVALUES_VERSION  1
 
 #define _EEVALUES_CRC_SEED  0x81
 
@@ -45,48 +51,68 @@
 
 typedef uint32_t  EeIdent;
 
+typedef uint16_t  eeoffset_t;
+#define  ERR_NO_HEADER  ((eeoffset_t) -1)
+#define  ERR_HEADER_BAD_CRC  ((eeoffset_t) -2)
+
+
 /* ------------------------------------------------------------------- */
 
 class EeValues
 {
    public :
-#if _EEVALUES_CONF_HUNT_FOR_RECORD   
-     boolean  tryRead();
+#if _EEVALUES_CONF_HUNT_FOR_RECORD
+     boolean  findHeader();
 #endif
-     boolean  tryRead( uint16_t offset );
+
+     boolean  isHeaderValid(void);
      int      write(void);
 
      //  Erase the "user data portion" of the record.  0xFF reduces wear on EE memory.
+     void eraseWholeRecord( uint8_t fill_value = 0xff );
      void eraseUserData( uint8_t fill_value = 0xff );
 
      EeIdent  ident(void) const { return m_header.m_ident; }
-     // void    setIdent( EeIdent id ) { m_ident = id; }
 
-     /*** Pass in size of whole record including EeValues header.
-      *   @param siz - sizeof(WholeRecordSubClassedFromEeValues)
-      */
-     void     setSize( uint8_t siz ) { m_header.m_full_size = siz - sizeof(EeValues) + sizeof(EeHeader); }
+     //  User data exists in RAM memory ( not PROGMEM ).
+     void     setUserDataPtr( void * user_data ) { m_user_data = user_data; }
+     void *   userDataPtr(void) const { return m_user_data; }
+
+     // Pass in size of user record ( that doesn't count EeValues header ).
+     void     setUserSize( uint8_t siz ) { m_header.m_full_size = siz + sizeof(EeHeader); }
+
+     //  Portion that is client's, i.e. after the EeHeader stored in front of record.
+     //  Client's portion of record, not the actual size in ee-memory.
+     unsigned userSize(void) const { return m_header.m_full_size - sizeof(EeHeader); }
 
      //  Actual size stored, which includes EeValues overhead.
      unsigned realSize() const { return m_header.m_full_size; }
 
-     //  Portion that is client's, i.e. after the EeHeader stored in front of record.
-     //  Client size of record, not the actual size in ee-memory.
-     unsigned userSize() const { return m_header.m_full_size - sizeof(EeHeader); }
+     //  After calling updateCrc8(), here writes from setUserDataPtr() into EE.
+     int        writeToEe( void );
 
-     //  Return EE-memory offset immediately after this whole record.
-     //  Valid once a valid record has been detected.
-     unsigned offsetAfter() const { return s_start_offset + realSize(); }
-     
+     //  Copies from EE into setUserDataPtr() using size in EE header.
+     int        writeToUser( void );
+
+     int        writeToUser( eeoffset_t ee_offset, void * user_buffer, size_t ee_count );
+
      void     updateCrc8();
      uint8_t  crc8() const   { return m_header.m_crc8; }
      void     setCrc8( uint8_t crc ) { m_header.m_crc8 = crc; }
 
-     //  Return EE-memory offset of last read or write.
-     static uint16_t  getLastStoreSffset(void) { return s_start_offset; }
-     
+     boolean     setEeOffset( eeoffset_t starting ) { m_start_offset = starting; }
+
+     //  Return EE offset of where header was found.
+     eeoffset_t  eeOffset(void) const { return m_start_offset; }
+
+     //  Return EE-memory offset past last read or write.
+     eeoffset_t  UUgetLastStoreSffset(void) { return m_start_offset + m_header.m_full_size; }
+
+     EeValues( EeIdent id );
+
    protected :
-     //  Instance vars are stored ahead of client record.
+     //  Header is stored in EEPROM ahead of user-bytes.
+     //  A copy is here for match / finding the 4 char identification.
      //  CRC IS STORED FIRST, WHEN COMPUTING CHECK, CODE ASSUMES THIS.
      struct EeHeader {
         uint8_t        m_crc8;             // valid after call to this->update_crc8()
@@ -96,24 +122,13 @@ class EeValues
         EeIdent        m_ident;
      } m_header;
 
+     eeoffset_t     m_start_offset;
+
+     void *         m_user_data;
+
 #if _EEVALUES_CONF_HUNT_FOR_RECORD
      int       _find_ident();
 #endif
-
-     uint8_t * _userDataPtr() const { return (uint8_t *) (this+1); }
-
-     //  Static ( class-vars ) that are not stored in EE memory.
-     static int  s_start_offset;
-     
-     //  Protected constructor so client MUST derive this class.
-     //  Doing this inline saves 2 bytes (Sept 2013).
-     EeValues( EeIdent id, size_t complete_siz )
-     {
-        // GCC 4.4 can't initialize a field inside an instance-var structure, so do it manually.
-        m_header.m_ident = id;
-        m_header.m_crc8 = 0;
-        m_header.m_full_size = complete_siz - sizeof(*this) + sizeof(m_header);
-     }
 
    private :
      // no implementation for these:
@@ -121,7 +136,6 @@ class EeValues
      EeValues& operator=( const EeValues & );
      unsigned char operator==( const EeValues & rhs ) const;
 };
- 
- 
+
+
 #endif
- 

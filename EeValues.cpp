@@ -1,6 +1,6 @@
 /** EeValues.cpp ** Store record in EE memory **  Brian Witt ** Sept 2013 **/
 /*
- *  Allow sotrage of a data record in EE-memory.  Class is a header that
+ *  Allow storage of a data record in EE-memory.  Class is a header that
  *  is stored along with client's data.  It is expected that all persistent
  *  variables for the Arduino application will be stored together.
  *  However, this class-type can be derived for many data-records if
@@ -23,12 +23,11 @@
  */
 
 #include <EeValues.h>
-
-#include <CnUtils.h>
 #include <crc8.h>
-
 #include <avr/eeprom.h>
-// #include <stddef.h>	/* offsetof() */
+
+//   Ardu 1.5: A library doesn't know about other libraries. https://code.google.com/p/arduino/wiki/BuildProcess
+#include "../CnUtils/CnUtils.h"
 
 
 /*  Define 0/1 to disable/enable debugging messages to 'Serial' */
@@ -38,15 +37,12 @@
 
 /* ------------------------------------------------------------------- */
 
-//  Static ( class-vars ) that are not stored in EE memory.
-int  EeValues::s_start_offset;
-
 
 //  ASSUME sizeof(EeIdent) == sizeof(uint32_t)
 typedef union
 {
         uint32_t dword;
-        struct
+        struct PACKED
         {
             uint8_t byte0;
             uint8_t byte1;
@@ -69,7 +65,7 @@ static uint8_t debug_crc8( uint8_t inCrc, uint8_t data )
     Serial.print( ") --> " );
     Serial.println( updated, HEX );
 
-    return( updated );    
+    return( updated );
 }
 
 static uint8_t debug_Crc8Block( uint8_t inCrc, const uint8_t *data, uint8_t len )
@@ -91,34 +87,30 @@ static uint8_t debug_Crc8Block( uint8_t inCrc, const uint8_t *data, uint8_t len 
 
 /* ------------------------------------------------------------------- */
 
-#if _EEVALUES_CONF_HUNT_FOR_RECORD
-/***
- *   Go looking for 'ident' somewhere in EE-memory.  Failure could be
- *   an invalid CRC as well.
- *   @return true if found, false otherswise.
- *   @seealso E2END last valid EE address, e.g. 1023.
- */
-boolean
-EeValues::tryRead()
+
+EeValues::EeValues( EeIdent id )
 {
+    // GCC 4.4 can't initialize a field inside an instance-var structure, so do it manually.
+    m_header.m_ident = id;
+    m_header.m_crc8 = 0;
+    m_header.m_full_size = 0;
 
-    if( _find_ident() >= 0 )
-        return true;
+    m_start_offset = 0;
+    m_user_data = 0;
+}
 
-    return( false );
-}   /* end EeValues::TryRead() */
-#endif
+/* ------------------------------------------------------------------- */
 
 /***
  *   Go looking for 'ident' header at offset give in EE-memory.
+ *   Size is NOT matched, just 'ident'.
  *   Failure could be an invalid CRC as well.
- *   Expected size must already be set in record.
  *
- *   @return true if found and update 's_start_offset', false otherswise.
+ *   @return true if found and update 'm_start_offset', false otherwise.
  *   @seealso E2END last valid EE address, e.g. 1023.
  */
 boolean
-EeValues::tryRead(const uint16_t base_offset)
+EeValues::isHeaderValid(void)
 {
     register uint8_t  match0;
     uint8_t  match1;
@@ -126,6 +118,10 @@ EeValues::tryRead(const uint16_t base_offset)
     uint8_t  match3;
     FourBytes  buff;
     boolean  found = false;
+
+    //  Align to where IDENT lives in the record, then check!
+    eeoffset_t  base_offset = eeOffset();
+    eeoffset_t  offset      = base_offset + offsetof(EeHeader, m_ident);
 
     {
         const FourBytes * p = (const FourBytes *) & this->m_header.m_ident;
@@ -149,12 +145,6 @@ EeValues::tryRead(const uint16_t base_offset)
     }
 #endif
 
-    s_start_offset = base_offset;
-
-    //  Align to where IDENT lives in the record, then check!
-//    uint16_t offset = base_offset + offsetof(EeValues, m_ident);
-    uint16_t offset = base_offset + offsetof(EeHeader, m_ident);
-
     buff.dword = eeprom_read_dword( (const uint32_t *) offset );
 
     if( (buff.byte.byte0 == match0) &&
@@ -163,92 +153,110 @@ EeValues::tryRead(const uint16_t base_offset)
         (buff.byte.byte3 == match3) )
     {
 #if EEVALUES_DEBUG
-        Serial.println( " .. found IDENT match!" );
+        Serial.println( " .. found Ident-4Code match!" );
 #endif
-        // Found a matching IDENT. Now inspect size byte.
-        if( eeprom_read_byte( (const uint8_t *) (base_offset + offsetof(EeHeader, m_full_size)) ) == m_header.m_full_size )
+        // Found a matching IDENT.
+
+        // Now check if the EE-CRC is valid by recomputing it and checking for a match....
+        match0 = eeprom_read_byte( (const uint8_t *) (base_offset + offsetof(EeHeader, m_crc8) ) );
+
+        //  Remember to skip EE CRC.  We'll compare it afterwards.
+        uint16_t  off = base_offset + sizeof(m_header.m_crc8);
+        uint8_t   siz = realSize() - sizeof(m_header.m_crc8);
+        uint8_t   crc = _EEVALUES_CRC_SEED;
+
+        for( ; siz > 0 ; --siz, ++off )
+        {
+#if EEVALUES_DEBUG_CRC
+            // DEBUG: prefix crc value with EE address.
+            printHexWidth( Serial, off, 3 );
+            Serial.print( ": " );
+#endif
+            crc = Crc8( crc, eeprom_read_byte( (const uint8_t *) off ) );
+        }
+
+#if EEVALUES_DEBUG
+        Serial.print( " .. EE crc=0x" );
+        Serial.print( match0, HEX );
+        Serial.print( " (EE offset=$" );
+
+        const unsigned  offs = base_offset + offsetof(EeHeader, m_crc8);
+        printHexWidth( Serial, offs, 3 );
+
+        Serial.print( "), computed CRC=0x" );
+        Serial.println( crc, HEX );
+#endif
+        /* Compare EE read-CRC with EE computed CRC.  Is EE-record valid? */
+        if( match0 == crc )
         {
 #if EEVALUES_DEBUG
-                Serial.println( " .. found size match!" );
+            Serial.println( " .. found CRC match!" );
 #endif
-                // Now check if the EE-CRC is valid by recomputing it and checking for a match....
-                match0 = eeprom_read_byte( (const uint8_t *) (base_offset + offsetof(EeHeader, m_crc8) ) );
+            m_header.m_full_size = eeprom_read_byte( (const uint8_t *) (base_offset + offsetof(EeHeader, m_full_size)) );
 
-                //  The EE header looks plausible, so compute CRC of the whole EE image.
-                //  Remember to skip EE CRC.  We'll compare it at the end.
-                uint16_t  off = base_offset + sizeof(m_header.m_crc8);
-                uint8_t   crc = _EEVALUES_CRC_SEED;
-
-                for( uint8_t siz = realSize() - sizeof(m_header.m_crc8) ; siz > 0 ; --siz, ++off )
-                {
-#if EEVALUES_DEBUG_CRC
-                    // DEBUG: prefix crc value with PROGMEM address.
-                    printHexWidth( Serial, off, 3 );
-                    Serial.print( ": " );
-#endif
-                    crc = Crc8( crc, eeprom_read_byte( (const uint8_t *) off ) );
-                }
-
-#if EEVALUES_DEBUG
-                Serial.print( " .. EE crc=0x" );
-                Serial.print( match0, HEX );
-                Serial.print( " (offset=$" );
-#ifdef OFFSET_OF_BRAIN_DAMAGE
-        *** gcc version 4.3.2 (WinAVR 20081205) :
-        C:\Users\brian\Documents\Arduino\libraries\EeValues\EeValues.cpp: In member function 'boolean EeValues::tryRead(uint16_t)':
-        C:\Users\brian\Documents\Arduino\libraries\EeValues\EeValues.cpp:189: warning: invalid access to non-static data member 'EeValues::m_header' of NULL object
-        C:\Users\brian\Documents\Arduino\libraries\EeValues\EeValues.cpp:189: warning: (perhaps the 'offsetof' macro was used incorrectly)
-                Serial.print( (base_offset + offsetof( EeValues, m_header.m_crc8 ) ) );
-#endif
-                const unsigned  offs = ((char *) &(((EeValues *)base_offset) -> m_header.m_crc8 )) - (char *) 0;
-                printHexWidth( Serial, offs, 3 );
-
-                Serial.print( "), computed CRC=0x" );
-                Serial.println( crc, HEX );
-#endif
-                /* Compare EE read-CRC with EE computed CRC.  Is EE-record valid? */
-                if( match0 == crc )
-                {
-#if EEVALUES_DEBUG
-                    Serial.println( " .. found CRC match!" );
-#endif
-                    //  It is good, so copy user record portion from EE into this object.
-                    /*          eeprom_read_block (void *__dst, const void *__src, size_t __n)  */
-                    eeprom_read_block( _userDataPtr(), (void *) (base_offset + sizeof(EeHeader)), userSize() );
-
-                    s_start_offset = base_offset;
-                    found = true;
-                }
+            m_start_offset = base_offset;
+            found = true;
         }
     }
 
     return( found );
 }   /* end EeValues::TryRead() */
 
+
+int
+EeValues::writeToUser(void)
+{
+    /*          eeprom_read_block (void *__dst, const void *__src, size_t __n)  */
+    eeprom_read_block( userDataPtr(), (void *) (m_start_offset + sizeof(EeHeader)), userSize() );
+
+    return( userSize() );
+}   // end EeValues::writeToUser()
+
+
+int
+EeValues::writeToUser( eeoffset_t ee_offset, void * user_buffer, size_t ee_count )
+{
+#if EEVALUES_DEBUG
+    Serial.print( "writeToUser( $" );
+    Serial.print( ee_offset, HEX );
+    Serial.print( ", $" );
+    Serial.print( (unsigned) user_buffer, HEX );
+    Serial.print( ", " );
+    Serial.print( ee_count );
+    Serial.println( ")" );
+#endif
+
+    eeprom_read_block( user_buffer, (const uint8_t *) ee_offset, ee_count );
+
+    return( ee_count );
+}   /* end EeValues::writeToUser() */
+
 /***
  *   Just writes the whole object, both EeValues header and the
  *   user's record, into EE-memory.
  *   Make separate call to update CRC, if needed.
+ *  Ardu 1.5; routine adds 168 bytes to sketch size (with DEBUG on).
  *
  *   Note: EE-memory is slow to write, like 3.3 millliseconds of busy after a
  *         write.  And the CPU is paused for 2 clock cycles after each write
  *        (see Atmel 16u4 manual, Table 5-3 on page 23).
  */
 int
-EeValues::write()
+EeValues::writeToEe(void)
 {
 
     /*                      eeprom_write_block (const void *_RAM_src, void *_EE_dst, size_t __n)  */
-    eeprom_write_block( (const void *) &this->m_header, (void *) s_start_offset, sizeof(this->m_header) );
-    eeprom_write_block( (const void *) this->_userDataPtr(), (void *) (s_start_offset + sizeof(this->m_header)), userSize() );
+    eeprom_write_block( (const void *) &this->m_header, (void *) m_start_offset, sizeof(this->m_header) );
+    eeprom_write_block( (const void *) this->userDataPtr(), (void *) (m_start_offset + sizeof(this->m_header)), userSize() );
 
-    return( 0 );
-}   /* end EeValues::write() */
+    return( realSize() );
+}   /* end EeValues::writeToEe() */
 
 /* ------------------------------------------------------------------- */
 
 /***
  *  Computes the in-memory CRC and stores that value into the CRC field of the object.
+ *  Ardu 1.5; routine adds 170 bytes to sketch size (with DEBUG on).
  */
 void
 EeValues::updateCrc8()
@@ -257,7 +265,7 @@ EeValues::updateCrc8()
     uint8_t   crc = Crc8Block( _EEVALUES_CRC_SEED,
                                 (const uint8_t *) &this->m_header + sizeof(m_header.m_crc8),
                                 sizeof(this->m_header) - sizeof(m_header.m_crc8) );
-    crc = Crc8Block( crc, _userDataPtr(), userSize() );
+    crc = Crc8Block( crc, (const uint8_t *) userDataPtr(), userSize() );
 
     setCrc8( crc );
 
@@ -276,13 +284,30 @@ EeValues::eraseUserData( uint8_t fill_value )
 #if EEVALUES_DEBUG
     Serial.println( "eraseUserData()" );
 #endif
-    memset( _userDataPtr(), fill_value, userSize() );
+    memset( userDataPtr(), fill_value, userSize() );
 }   /* end EeValues::eraseUserData() */
+
 
 /* ------------------------------------------------------------------- */
 
 #if _EEVALUES_CONF_HUNT_FOR_RECORD
- 
+
+/***
+ *   Go looking for 'ident' somewhere in EE-memory.  Failure could be
+ *   an invalid CRC as well.
+ *   @return true if found, false otherwise.
+ *   @seealso E2END last valid EE address, e.g. 1023.
+ */
+boolean
+EeValues::findHeader()
+{
+
+    if( _find_ident() >= 0 )
+        return true;
+
+    return( false );
+}   /* end EeValues::TryRead() */
+
 int
 EeValues::_find_ident()
 {
@@ -300,7 +325,7 @@ EeValues::_find_ident()
         match2 = p->byte.byte2;
         match3 = p->byte.byte3;
     }
-    
+
     for( int offset = E2END - realSize() + offsetof(EeHeader, m_ident) ; offset >= 0 ; offset-- )
     {
         if( match0 != eeprom_read_byte( (const uint8_t *) offset ) )
@@ -318,14 +343,14 @@ EeValues::_find_ident()
             if( b == this->m_full_size )
             {
                 //  record size matches, so do a full-on CRC.
-                
+
                 TODO-IMPLEMENT-CRC-CHECK;
 
                 s_start_offset = offset;
                 return( offset );
             }
         }
-        
+
     }
 
     //  Something negative means not found.
