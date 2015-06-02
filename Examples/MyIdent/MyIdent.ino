@@ -1,9 +1,9 @@
+/***  libraries/EeValues/Examples/MyIdent/MyIdent.ino  June 2015, brian witt ***/
 
-
-//  MUST HAVE <crc8.h> ELSE COMPILE FAILS (bwitt, Sept 2013).
+//  Ardu 1.5: Required to make EeValues class compile OK.
 #include <crc8.h>
+
 #include <EeValues.h>
-#include <Boards.h>        // is libraries\Firmata\Boards.h
 #include <CnUtils.h>
 
 
@@ -25,6 +25,71 @@ EeValues    eeMyIdent(REC_IDENT);
 // #undef F
 // #define F(str) str
 
+void dump_some_ee()
+{
+  Serial.println();
+  dumpEE( Serial, 0, 64 );
+  Serial.println();
+}   /* end dump_some_ee() */
+
+
+boolean validate_record()
+{
+    Serial.println();
+
+    boolean  res = false;
+
+    struct MyIdent  second_chance;
+    memset( & second_chance, 0x55, sizeof(second_chance) );
+
+      eeoffset_t   ee;
+      byte *       ptr;
+
+      ee = eeMyIdent.lastStoredOffset() - 1;
+
+      for( int cnt = eeMyIdent.userRecordSize() ; --cnt >= 0 ; --ee )
+      {
+          ptr = (byte *) (((byte *)&second_chance) + cnt);
+          eeMyIdent.readToUser( ee, ptr, 1 );
+      }
+      
+      if( memcmp( &flim, &second_chance, sizeof(second_chance) ) == 0 )
+      {
+          Serial.println( "OK, single byte reading is correct." );
+          res = true;
+      }
+      else
+      {
+          Serial.println( "ERROR: single byte reading FAILED!!" );
+      }
+
+    return( res );
+}   /* end validate_record() */
+
+
+void
+update_poll_addr()
+{
+
+      if( eeMyIdent.userRecordSize() == sizeof(flim) )
+      {
+            eeMyIdent.readToUser();
+
+            flim.poll_addr += 1;
+            
+            eeMyIdent.updateCrc8();
+            eeMyIdent.writeToEe();
+      }
+      else
+      {
+          Serial.println( "*** WRONG SIZE ***" );
+      }
+
+}   /* end update_poll_addr() */
+
+
+/* ------------------------------------------------------------------- */
+
 
 void setup() {
   // put your setup code here, to run once:
@@ -34,13 +99,21 @@ void setup() {
     eeMyIdent.setUserSize( sizeof(flim) );    
 
     //  Go look for thing in EE.
-  boolean res = true;
-#if _EEVALUES_CONF_HUNT_FOR_RECORD
+  boolean res = false;
+
+#if EEVALUES_CONF_HUNT_FOR_RECORD
   res = eeMyIdent.findHeader();
   if( res )
   {
       Serial.print( "Found it at EE offset $" );
-      Serial.println( eeMyIdent.getLastStoreSffset(), HEX );
+      printHexWidth( Serial, eeMyIdent.eeOffsetOfHeader(), 3 );
+      Serial.println();
+  }
+  else
+  {
+      //  If none found, provide a default location in EEMEM.
+      Serial.println( "None found, so providing default location" );
+      eeMyIdent.setEeOffset( REC_EE_OFFSET );
   }
 #else
   eeMyIdent.setEeOffset( REC_EE_OFFSET );
@@ -49,12 +122,12 @@ void setup() {
   if( res )
   {
       Serial.print( F("Found ") );
-      Serial.print( eeMyIdent.userSize() );
+      Serial.print( eeMyIdent.userRecordSize() );
       Serial.println( F(" USER bytes in EE.") );
 
-      if( eeMyIdent.userSize() == sizeof(flim) )
+      if( eeMyIdent.userRecordSize() == sizeof(flim) )
       {
-            eeMyIdent.writeToUser();
+            eeMyIdent.readToUser();
       }
       else
       {
@@ -84,41 +157,54 @@ void setup() {
   }
 
   //  See if can read EE one byte at a time.
-  {
-      Serial.println();
-      struct MyIdent  second_chance;
-      memset( & second_chance, 0x55, sizeof(second_chance) );
+  validate_record();
 
-      eeoffset_t   ee;
-      byte *       ptr;
-
-      ee = eeMyIdent.UUgetLastStoreSffset() - 1;
-
-      for( int cnt = eeMyIdent.userSize() ; --cnt >= 0 ; --ee )
-      {
-          ptr = (byte *) (((byte *)&second_chance) + cnt);
-          eeMyIdent.writeToUser( ee, ptr, 1 );
-      }
-      
-      if( memcmp( &flim, &second_chance, sizeof(second_chance) ) == 0 )
-      {
-          Serial.println( "OK, single byte reading is correct." );
-      }
-      else
-      {
-          Serial.println( "ERROR: single byte reading FAILED!!" );
-      }
-  }
-
-  Serial.println();
-  dumpEE( Serial, 8, 32 );
-  Serial.println();
+  dump_some_ee();
 
   Serial.print( F("Bytes in heap = ") );
   Serial.println( freeRam() );
+  
+  //  Menu of commands.
+  Serial.println( "Commands:  E = Erase EEMEM ; D = Dump some EEMEM ; V = Validate Record ;" );
+  Serial.println( "           U = Update record." );
+  Serial.println();
 }
 
+int  ch;
+
 void loop() {
-  // put your main code here, to run repeatedly: 
-  
+
+    // send data only when you receive data:
+    if (Serial.available() > 0 && (ch = Serial.read()) > 0 )
+    {
+        if( 'a' <= ch && ch <= 'z' )        // TOUPPER(ch)
+            ch -= 0x020;
+
+        // read the incoming byte.
+        switch( ch )
+        {
+            case 'E' :
+                {
+                EeValues  erasure( 0 );
+                erasure.setEeOffset( 0 );
+                erasure.setUserSize( erasure.eeSize() - 16 );
+                erasure.eraseWholeRecord();
+                }
+     
+                 Serial.println( "EE erased." );
+                 break;
+                 
+             case 'D' :
+                 dump_some_ee();
+                 break;
+
+            case 'U' :
+                update_poll_addr();
+                break;
+
+            case 'V' :
+                validate_record();
+                break;
+        }
+    }
 }

@@ -1,27 +1,39 @@
 /** EeValues.h ** Store record in EE memory **  Brian Witt ** Sept 2013 **/
 /*
- *  Allow sotrage of a data record in EE memory.  Class is a header that
- *  is stored along with client's data.  It is expected that all persistent
- *  variables for the Arduino application will be stored together.
- *  However, this class-type can be derived for many data-records if
- *  needed.
+ *  Allow storage of a data record in EE memory.  A header provides a CRC
+ *  check-value, an identification, and size of user-data.  Application can
+ *  update its data record, update CRC, and then write to EEMEM.  It
+ *  can read back the whole user record ( if buffer space is available ),
+ *  or read in chunks.  The EEMEM record can also be erased.  On 8-bit
+ *  ATMEL's, EEMEM is not large, like maybe 256 or 2048 bytes.
+ * 
+ *  The object provides a pointer into EEMEM.  The object holds a 4-byte
+ *  identification value, e.g. 4 ASCII chars, along with the CRC over the
+ *  header and user-data.  The very important item held by the object is
+ *  the starting offset in EEMEM ; however, the application usually has
+ *  this hard-coded.  Therefore, this object can be allocated on the
+ *  stack during setup and "write settings to EEMEM" operation.  Yet,
+ *  the object is small enough to keep around....
  *
- *  As long as there NO virtual methods, the whole object object, including
- *  the EeValues header can be written straight from RAM into EE-memory.
+ *  Reading and Writing ... This object represents EEMEM, so reading and
+ *  writing are relative to EEMEM.  So to copy from EEMEM into a user RAM
+ *  structure is "reading".  Putting bytes into EEMEM is "writing".
  *
- * #if _EEVALUES_CONF_HUNT_FOR_RECORD
+ *
+ * #if EEVALUES_CONF_HUNT_FOR_RECORD
  *   The action stored location in EE memory is hidden from the caller.
  *   The TryRead() method will search for the record using the 'ident' and
  *   ensure a good CRC of the whole record.  If either 'ident' not found
  *   or the CRC is invalid, then the data-record cannot be found.
  * #else
- *   User must know offset of record in EE-memory.  Fields that must match
- *   those already set are: identification (4 bytes), whole size (1 byte),
- *   and CRC (1 byte).
+ *   User must know offset of record in EE-memory.  The identification
+ *   field must match, and the CRC must be valid.  It is up to the
+ *   application to determine if the size is reasonable or not.
  * #endif
  *
  *    brian witt    Sept 2013    New.
  *    brian witt    Nov 2013     Fields stored in EE memory now own structure.
+ *    brian witt    June 2015    Revise and clean-up.
  */
 
 #ifndef _LIBRARIES_EEVALUES_H
@@ -32,7 +44,7 @@
 
 
 /**  Define 1 to hunt/search for RECORD, 0 for client to explicitly state offset. */
-#define _EEVALUES_CONF_HUNT_FOR_RECORD   0
+#define EEVALUES_CONF_HUNT_FOR_RECORD   01
 
 
 /* ------------------------------------------------------------------- */
@@ -61,16 +73,20 @@ typedef uint16_t  eeoffset_t;
 class EeValues
 {
    public :
-#if _EEVALUES_CONF_HUNT_FOR_RECORD
+#if EEVALUES_CONF_HUNT_FOR_RECORD
      boolean  findHeader();
 #endif
 
      boolean  isHeaderValid(void);
      int      write(void);
 
-     //  Erase the "user data portion" of the record.  0xFF reduces wear on EE memory.
+     //  Erase our header and "user data portion".
      void eraseWholeRecord( uint8_t fill_value = 0xff );
-     void eraseUserData( uint8_t fill_value = 0xff );
+     //  Erase the "user data portion" of the record.  0xFF reduces wear on EE memory.
+     void eraseEeUserData( uint8_t fill_value = 0xff );
+
+     //  Erase the EeValues' header in EE memory.
+     void eraseEeHeader(void);
 
      EeIdent  ident(void) const { return m_header.m_ident; }
 
@@ -83,18 +99,24 @@ class EeValues
 
      //  Portion that is client's, i.e. after the EeHeader stored in front of record.
      //  Client's portion of record, not the actual size in ee-memory.
-     unsigned userSize(void) const { return m_header.m_full_size - sizeof(EeHeader); }
+     unsigned userRecordSize(void) const { return m_header.m_full_size - sizeof(EeHeader); }
 
      //  Actual size stored, which includes EeValues overhead.
-     unsigned realSize() const { return m_header.m_full_size; }
+     unsigned totalSize(void) const { return m_header.m_full_size; }
+     
+     //  Return total size of EEMEM, i.e. E2END + 1.
+     static unsigned    eeSize() ;
 
      //  After calling updateCrc8(), here writes from setUserDataPtr() into EE.
      int        writeToEe( void );
 
      //  Copies from EE into setUserDataPtr() using size in EE header.
-     int        writeToUser( void );
+     int        readToUser( void );
 
-     int        writeToUser( eeoffset_t ee_offset, void * user_buffer, size_t ee_count );
+     //  Copies from EE into setUserDataPtr() using size in EE header.
+     //   'ee_offset' is offset in all of EE, so use eeOffset() to find starting place
+     //   of header to current record.
+     int        readToUser( eeoffset_t ee_offset, void * user_buffer, size_t ee_count );
 
      void     updateCrc8();
      uint8_t  crc8() const   { return m_header.m_crc8; }
@@ -103,10 +125,11 @@ class EeValues
      boolean     setEeOffset( eeoffset_t starting ) { m_start_offset = starting; }
 
      //  Return EE offset of where header was found.
-     eeoffset_t  eeOffset(void) const { return m_start_offset; }
+     eeoffset_t  eeOffsetOfHeader(void) const { return m_start_offset; }
+     eeoffset_t  eeOffsetOfUserRecord(void) const { return m_start_offset + sizeof(EeHeader); }
 
      //  Return EE-memory offset past last read or write.
-     eeoffset_t  UUgetLastStoreSffset(void) { return m_start_offset + m_header.m_full_size; }
+     eeoffset_t  lastStoredOffset(void) { return m_start_offset + m_header.m_full_size; }
 
      EeValues( EeIdent id );
 
@@ -122,11 +145,13 @@ class EeValues
         EeIdent        m_ident;
      } m_header;
 
+     //  Offset to start of header for user's record.
      eeoffset_t     m_start_offset;
 
+     //  Ptr to application's RAM user data that connects to EEMEM via 'm_start_offset'.
      void *         m_user_data;
 
-#if _EEVALUES_CONF_HUNT_FOR_RECORD
+#if EEVALUES_CONF_HUNT_FOR_RECORD
      int       _find_ident();
 #endif
 
