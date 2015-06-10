@@ -24,11 +24,11 @@ See [Arduino Build Process](https://code.google.com/p/arduino/wiki/BuildProcess)
 It compiles nicely ; however, it requires two other libraries:
 
 0. crc8 ( Crc8 )
-0. CrunchyNoodles Utilities ( CnUtils ) for debugging.
+0. CrunchyNoodles Utilities ( CnUtils ) , for debugging.
 
-Both of these are available in my user area on (https://github.com/sacnorthern/) .
+Both of these are available in my user area on (https://github.com/sacnorthern/)[SacNOrthern's GitHub].
 
-In the near-future, I want to make improvements.  I would like to change to CRC-16 from CRC-8, since the CRC_16 library is already  part of the IDE.
+In the near-future, I want to make improvements.  I would like to change to CRC-16 from CRC-8, since the CRC-16 library is already  part of the IDE.
 
 
 # License
