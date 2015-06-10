@@ -1,6 +1,5 @@
 # Arduino-EeValues
-For Arduino -- Store records into EEMEM.  
-The ATMEL processor has from 128 to 2048 bytes of non-volatile storage that is byte addressable.
+For Arduino -- Store records into EEMEM.  The ATMEL 8-bit processors have from 128 to 2048 bytes of non-volatile storage that is byte addressable.  The constant `E2END` is the last byte addressable.
 
 In the header of each record is a 4-char identification, size of the record ( sum of header overhead and user data ), and a CRC.  Several can be stored at different offsets within EEMEM.  This allows you a small file-store like non-volatile storage.  If you want to do wear-leveling, store the record at different offsets.  The library can search for a valid header (just remember to erase the previous record).
 
@@ -16,8 +15,8 @@ There is an oddity about the Arduino IDE: a library cannot depend on another lib
 `#include <Crc8.h>`
 However, when compiling the EeValues library, `Arduino/libraries` isn't added to the *System Include Folder List*.  So two things are required:
 
-0. the application must `#include <crc8.h>` to create the functions, and
-0. the library includes this library with the hack `#include "../crc8/crc8.h"`.  
+0. The application must `#include <crc8.h>` to create the functions, and
+0. The library includes this library with the hack `#include "../crc8/crc8.h"`.  
 See [Arduino Build Process](https://code.google.com/p/arduino/wiki/BuildProcess) for details.
 
 
@@ -29,9 +28,7 @@ It compiles nicely ; however, it requires two other libraries:
 
 Both of these are available in my user area on (https://github.com/sacnorthern/) .
 
-In the near-future, I want to make improvements.  
-I would like to change to CRC-16 from CRC-8, since the CRC_16 library is already  
-part of the IDE.
+In the near-future, I want to make improvements.  I would like to change to CRC-16 from CRC-8, since the CRC_16 library is already  part of the IDE.
 
 
 # License

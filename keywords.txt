@@ -6,19 +6,34 @@
 # Methods and Functions EeValues (KEYWORD2)
 #######################################
 
-tryRead			KEYWORD2
-write			KEYWORD2
-eraseUserData           KEYWORD2
-printHexWidth		KEYWORD2
-dumpEE	                KEYWORD2
-offsetAfter             KEYWORD2
+findHeader		KEYWORD2
+_find_ident             KEYWORD2
 
-realSize                KEYWORD2
-userSize                KEYWORD2
+isHeaderValid           KEYWORD2
+write			KEYWORD2
+eraseWholeRecord        KEYWORD2
+eraseUserData           KEYWORD2
+eraseEeHeader           KEYWORD2
+ident                   KEYWORD2
+
+setUserDataPtr           KEYWORD2
+userDataPtr             KEYWORD2
+setUserSize             KEYWORD2
+userRecordSize          KEYWORD2
+totalSize               KEYWORD2
+eeSize                  KEYWORD2
+
+writeToEe               KEYWORD2
+readToUser              KEYWORD2
 
 updateCrc8		KEYWORD2
 crc8                    KEYWORD2
 setCrc8                 KEYWORD2
+
+setEeOffset             KEYWORD2
+eeOffsetOfHeader        KEYWORD2
+eeOffsetOfUserRecord    KEYWORD2
+lastStoredOffset        KEYWORD2
 
 MK4CODE			KEYWORD2
 
@@ -30,6 +45,8 @@ MK4CODE			KEYWORD2
 uint8_t         KEYWORD1
 uint16_t        KEYWORD1
 uint32_t        KEYWORD1
+
+eeoffset_t      KEYWORD1
 
 EeIdent         KEYWORD1
 
@@ -47,3 +64,7 @@ EeValues	KEYWORD1
 
 _EEVALUES_CRC_SEED      LITERAL1
 _EEVALUES_VERSION       LITERAL1
+
+ERR_NO_HEADER           LITERAL1
+ERR_HEADER_BAD_CRC      LITERAL1
+
